@@ -1,0 +1,164 @@
+imports:
+  - name: password.py
+    path: common/password.py
+  - name: database.jinja
+    path: database.jinja
+  - name: database-proxy.jinja
+    path: database-proxy.jinja
+  - name: admin_node.jinja
+    path: admin_node.jinja
+  - name: content_nodes.jinja
+    path: content_nodes.jinja
+  - name: networking.jinja
+    path: networking.jinja
+  - name: runtimeconfig.jinja
+    path: runtimeconfig.jinja
+
+info:
+  version: '1.0'
+  title: WordPress HA Template
+
+required:
+  - zone
+  - contentNodeMachineType
+  - adminNodeMachineType
+  - dbMachineType
+  - network
+  - instancegroupTargetSize
+  - maxNumReplicas
+  - diskType
+  - dbDataDiskType
+  - bootDiskSizeGb
+  - docRootDiskSizeGb
+  - dbDataDiskSizeGb
+  - dbFailoverEnabled
+  - wordpressAdminEmail
+  - iamApiEnabled
+  - cloudSqlApiEnabled
+  - cloudBuilderApiEnabled
+
+properties:
+  zone:
+    type: string
+    default: us-central1-f
+    x-googleProperty:
+      type: GCE_ZONE
+  contentNodeMachineType:
+    type: string
+    default: e2-standard-2
+    x-googleProperty:
+      type: GCE_MACHINE_TYPE
+      zoneProperty: zone
+      gceMachineType:
+        minCpu: 1
+        minRamGb: 1.69
+  adminNodeMachineType:
+    type: string
+    default: e2-standard-2
+    x-googleProperty:
+      type: GCE_MACHINE_TYPE
+      zoneProperty: zone
+      gceMachineType:
+        minCpu: 1
+        minRamGb: 1.69
+  dbMachineType:
+    type: string
+    enum:
+      - db-f1-micro
+      - db-g1-small
+      - db-n1-standard-1
+      - db-n1-standard-2
+      - db-n1-standard-4
+      - db-n1-standard-8
+      - db-n1-standard-16
+      - db-n1-standard-32
+      - db-n1-standard-64
+      - db-n1-highmem-2
+      - db-n1-highmem-4
+      - db-n1-highmem-8
+      - db-n1-highmem-16
+      - db-n1-highmem-32
+      - db-n1-highmem-64
+    default: db-n1-standard-1
+  network:
+    type: string
+    default: default
+    x-googleProperty:
+      type: GCE_NETWORK
+  subnetwork:
+    type: string
+    x-googleProperty:
+      type: GCE_SUBNETWORK
+      zoneProperty: zone
+      gceSubnetwork:
+        networkProperty: network
+  instancegroupTargetSize:
+    type: integer
+    default: 2
+    minimum: 2
+    maximum: 100
+  maxNumReplicas:
+    type: integer
+    default: 10
+    minimum: 2
+    maximum: 100
+  diskType:
+    type: string
+    default: pd-standard
+    x-googleProperty:
+      type: GCE_DISK_TYPE
+      zoneProperty: zone
+  dbDataDiskType:
+    type: string
+    enum:
+      - PD_SSD
+      - PD_HDD
+    default: PD_HDD
+  bootDiskSizeGb:
+    type: integer
+    default: 10
+    minimum: 10
+    maximum: 10000
+    x-googleProperty:
+      type: GCE_DISK_SIZE
+      gceDiskSize:
+        diskTypeProperty: diskType
+  docRootDiskSizeGb:
+    type: integer
+    default: 10
+    minimum: 10
+    maximum: 10000
+    x-googleProperty:
+      type: GCE_DISK_SIZE
+      gceDiskSize:
+        diskTypeProperty: diskType
+  dbDataDiskSizeGb:
+    type: integer
+    default: 10
+    minimum: 10
+    maximum: 10000
+  dbFailoverEnabled:
+    type: boolean
+    default: True
+  wordpressAdminEmail:
+    type: string
+    x-googleProperty:
+      type: EMAIL_ADDRESS
+  inputEnableMultisite:
+    type: boolean
+    default: False
+  iamApiEnabled:
+    type: boolean
+    enum:
+      - True
+  cloudSqlApiEnabled:
+    type: boolean
+    enum:
+      - True
+  cloudBuilderApiEnabled:
+    type: boolean
+    enum:
+      - True
+outputs:
+  deployment:
+    type: string

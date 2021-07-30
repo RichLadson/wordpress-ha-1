@@ -1,0 +1,586 @@
+resources:
+- name: wordpress-ha-1-svc-account
+  properties:
+    accountId: wordpress-ha-1-svc-account
+    displayName: wordpress-ha-1-svc-account
+  type: iam.v1.serviceAccount
+- metadata:
+    dependsOn:
+    - wordpress-ha-1-svc-account
+  name: wordpress-ha-1-svc-account-key
+  properties:
+    parent: $(ref.wordpress-ha-1-svc-account.name)
+    privateKeyType: TYPE_GOOGLE_CREDENTIALS_FILE
+  type: iam.v1.serviceAccounts.key
+- accessControl:
+    gcpIamPolicy:
+      bindings:
+      - members:
+        - serviceAccount:wordpress-ha-1-svc-account@college-funding-consultant.iam.gserviceaccount.com
+        - serviceAccount:121070127883@cloudbuild.gserviceaccount.com
+        role: roles/storage.admin
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-svc-account
+  name: wordpress-ha-1-121070127883-wp-data
+  properties:
+    name: wordpress-ha-1-121070127883-wp-data
+  type: storage.v1.bucket
+- name: wordpress-ha-1-sql
+  properties:
+    backendType: SECOND_GEN
+    databaseVersion: MYSQL_5_7
+    settings:
+      backupConfiguration:
+        binaryLogEnabled: true
+        enabled: true
+      dataDiskSizeGb: 10
+      dataDiskType: PD_HDD
+      tier: db-f1-micro
+  type: sqladmin.v1beta4.instance
+- metadata:
+    dependsOn:
+    - wordpress-ha-1-sql
+  name: wordpress-ha-1-sql-failover
+  properties:
+    backendType: SECOND_GEN
+    databaseVersion: MYSQL_5_7
+    masterInstanceName: wordpress-ha-1-sql
+    replicaConfiguration:
+      failoverTarget: true
+    settings:
+      tier: db-f1-micro
+  type: sqladmin.v1beta4.instance
+- metadata:
+    dependsOn:
+    - wordpress-ha-1-sql
+    - wordpress-ha-1-sql-failover
+  name: wordpress-ha-1-database
+  properties:
+    charset: utf8
+    instance: $(ref.wordpress-ha-1-sql.name)
+    name: wordpress
+    rootPassword: (redacted)
+  type: sqladmin.v1beta4.database
+- metadata:
+    dependsOn:
+    - wordpress-ha-1-database
+    - wordpress-ha-1-sql
+  name: wordpress-ha-1-sql-wordpress-user
+  properties:
+    host: cloudsqlproxy~%
+    instance: $(ref.wordpress-ha-1-sql.name)
+    name: wordpress
+    password: (redacted)
+  type: sqladmin.v1beta4.user
+- name: wordpress-ha-1-sql-proxy-it
+  properties:
+    properties:
+      disks:
+      - autoDelete: true
+        boot: true
+        deviceName: boot
+        initializeParams:
+          diskSizeGb: 10
+          diskType: pd-standard
+          sourceImage: https://www.googleapis.com/compute/v1/projects/click-to-deploy-images/global/images/cloudsql-v20210711
+        type: PERSISTENT
+      machineType: g1-small
+      metadata:
+        items:
+        - key: deployment
+          value: wordpress-ha-1
+        - key: cloudsql-connection-name
+          value: $(ref.wordpress-ha-1-sql.connectionName)
+        - key: rtc-name
+          value: wordpress-ha-1-rtc
+        - key: status-config-url
+          value: https://runtimeconfig.googleapis.com/v1beta1/projects/college-funding-consultant/configs/wordpress-ha-1-rtc
+        - key: status-variable-path
+          value: sql-proxy-startup-status
+        - key: startup-script
+          value: |
+            #!/bin/bash
+            sysctl -w net.ipv4.conf.eth0.route_localnet=1
+            iptables -t nat -A PREROUTING \
+              -ptcp -i eth0 --dport 3306 \
+              -j DNAT --to 127.0.0.1:3306
+      networkInterfaces:
+      - accessConfigs:
+        - name: External-IP
+          type: ONE_TO_ONE_NAT
+        network: https://www.googleapis.com/compute/v1/projects/college-funding-consultant/global/networks/default
+      serviceAccounts:
+      - email: default
+        scopes:
+        - https://www.googleapis.com/auth/sqlservice.admin
+        - https://www.googleapis.com/auth/cloudruntimeconfig
+      tags:
+        items:
+        - wordpress-ha-1-sql-proxy
+    zone: us-central1-c
+  type: compute.v1.instanceTemplate
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-sql
+- name: wordpress-ha-1-sql-proxy-autoheal
+  properties:
+    checkIntervalSec: 5
+    tcpHealthCheck:
+      port: 3306
+    timeoutSec: 5
+    type: TCP
+    unhealthyThreshold: 5
+  type: compute.beta.healthCheck
+- name: wordpress-ha-1-sql-proxy-igm
+  properties:
+    autoHealingPolicies:
+    - healthCheck: $(ref.wordpress-ha-1-sql-proxy-autoheal.selfLink)
+      initialDelaySec: 120
+    baseInstanceName: wordpress-ha-1-sql-proxy-vm
+    instanceTemplate: $(ref.wordpress-ha-1-sql-proxy-it.selfLink)
+    namedPorts:
+    - name: mysql
+      port: 3306
+    targetSize: 1
+    zone: us-central1-c
+  type: compute.beta.instanceGroupManager
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-sql-proxy-autoheal
+    - wordpress-ha-1-sql-proxy-it
+- name: wordpress-ha-1-sql-proxy-autoscaler
+  properties:
+    autoscalingPolicy:
+      coolDownPeriodSec: 90
+      cpuUtilization:
+        utilizationTarget: 0.75
+      maxNumReplicas: 10
+    target: $(ref.wordpress-ha-1-sql-proxy-igm.selfLink)
+    zone: us-central1-c
+  type: compute.v1.autoscaler
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-sql-proxy-igm
+- name: wordpress-ha-1-sql-proxy-health-fw
+  properties:
+    allowed:
+    - IPProtocol: TCP
+      ports:
+      - '3306'
+    sourceRanges:
+    - 130.211.0.0/22
+    - 35.191.0.0/16
+    targetTags:
+    - wordpress-ha-1-sql-proxy
+  type: compute.v1.firewall
+- name: wordpress-ha-1-sql-proxy-client-fw
+  properties:
+    allowed:
+    - IPProtocol: TCP
+      ports:
+      - '3306'
+    sourceTags:
+    - wordpress-ha-1-sql-client
+    targetTags:
+    - wordpress-ha-1-sql-proxy
+  type: compute.v1.firewall
+- name: wordpress-ha-1-sql-proxy-health
+  properties:
+    checkIntervalSec: 10
+    tcpHealthCheck:
+      port: 3306
+    timeoutSec: 10
+    type: TCP
+    unhealthyThreshold: 2
+  type: compute.beta.healthCheck
+- name: wordpress-ha-1-sql-proxy-bs
+  properties:
+    backends:
+    - balacingMode: RATE
+      group: $(ref.wordpress-ha-1-sql-proxy-igm.instanceGroup)
+    healthChecks:
+    - $(ref.wordpress-ha-1-sql-proxy-health.selfLink)
+    loadBalancingScheme: INTERNAL
+    protocol: TCP
+    region: us-central1
+  type: compute.v1.regionBackendService
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-sql-proxy-igm
+    - wordpress-ha-1-sql-proxy-health
+- name: wordpress-ha-1-sql-proxy-fr
+  properties:
+    IPProtocol: TCP
+    backendService: $(ref.wordpress-ha-1-sql-proxy-bs.selfLink)
+    loadBalancingScheme: INTERNAL
+    ports:
+    - '3306'
+    region: us-central1
+  type: compute.v1.forwardingRule
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-sql-proxy-bs
+- metadata:
+    dependsOn:
+    - wordpress-ha-1-rtc
+    - wordpress-ha-1-sql-proxy-fr
+    - wordpress-ha-1-121070127883-wp-data
+    - wordpress-ha-1-svc-account-key
+  name: wordpress-ha-1-admin-it
+  properties:
+    properties:
+      disks:
+      - autoDelete: true
+        boot: true
+        deviceName: boot
+        initializeParams:
+          diskSizeGb: 10
+          diskType: pd-standard
+          sourceImage: https://www.googleapis.com/compute/v1/projects/click-to-deploy-images/global/images/wordpress-ha-v20210711
+        type: PERSISTENT
+      machineType: g1-small
+      metadata:
+        items:
+        - key: deployment
+          value: wordpress-ha-1
+        - key: wordpress-mysql-password
+          value: HQmvsUVbb3EbPz
+        - key: wordpress-admin-password
+          value: AXg8PStaP5HGoj
+        - key: wordpress-admin-email
+          value: rladso@yahoo.com
+        - key: wordpress-enable-multisite
+          value: false
+        - key: cloudsql-connection-ip
+          value: $(ref.wordpress-ha-1-sql-proxy-fr.IPAddress)
+        - key: bucket-name
+          value: $(ref.wordpress-ha-1-121070127883-wp-data.name)
+        - key: service-account-name
+          value: wordpress-ha-1-svc-account@college-funding-consultant.iam.gserviceaccount.com
+        - key: service-account-key-base-64
+          value: $(ref.wordpress-ha-1-svc-account-key.privateKeyData)
+        - key: rtc-name
+          value: wordpress-ha-1-rtc
+        - key: ip-variable-name
+          value: ipaddress
+        - key: ip-var-wait-timeout
+          value: 300
+        - key: lb-wait-timeout
+          value: 1500
+        - key: status-config-url
+          value: https://runtimeconfig.googleapis.com/v1beta1/projects/college-funding-consultant/configs/wordpress-ha-1-rtc
+        - key: status-variable-path
+          value: startup-status
+        - key: admin-status-path
+          value: admin-status
+        - key: is-admin-node
+          value: true
+      networkInterfaces:
+      - accessConfigs:
+        - name: External-IP
+          type: ONE_TO_ONE_NAT
+        network: https://www.googleapis.com/compute/v1/projects/college-funding-consultant/global/networks/default
+      serviceAccounts:
+      - email: default
+        scopes:
+        - https://www.googleapis.com/auth/cloudruntimeconfig
+      tags:
+        items:
+        - wordpress-ha-1-tcp-80
+        - wordpress-ha-1-sql-client
+    zone: us-central1-c
+  type: compute.v1.instanceTemplate
+- metadata:
+    dependsOn:
+    - wordpress-ha-1-sql-wordpress-user
+    - wordpress-ha-1-svc-account-key
+    - wordpress-ha-1-121070127883-wp-data
+    - wordpress-ha-1-admin-autoheal
+    - wordpress-ha-1-admin-it
+  name: wordpress-ha-1-admin-igm
+  properties:
+    autoHealingPolicies:
+    - healthCheck: $(ref.wordpress-ha-1-admin-autoheal.selfLink)
+      initialDelaySec: 180
+    baseInstanceName: wordpress-ha-1-admin-vm
+    instanceTemplate: $(ref.wordpress-ha-1-admin-it.selfLink)
+    namedPorts:
+    - name: http
+      port: 80
+    targetSize: 1
+    zone: us-central1-c
+  type: compute.beta.instanceGroupManager
+- name: wordpress-ha-1-admin-autoheal
+  properties:
+    checkIntervalSec: 30
+    port: 80
+    portName: http
+    requestPath: /
+    timeoutSec: 30
+    unhealthyThreshold: 4
+  type: compute.v1.httpHealthCheck
+- name: wordpress-ha-1-admin-health
+  properties:
+    checkIntervalSec: 10
+    port: 80
+    portName: http
+    requestPath: /
+    timeoutSec: 10
+    unhealthyThreshold: 2
+  type: compute.v1.httpHealthCheck
+- name: wordpress-ha-1-admin-backend
+  properties:
+    affinityCookieTtlSec: 0
+    backends:
+    - balacingMode: RATE
+      group: $(ref.wordpress-ha-1-admin-igm.instanceGroup)
+    healthChecks:
+    - $(ref.wordpress-ha-1-admin-health.selfLink)
+    loadBalancingScheme: EXTERNAL
+    sessionAffinity: GENERATED_COOKIE
+  type: compute.v1.backendService
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-admin-igm
+    - wordpress-ha-1-admin-health
+- name: wordpress-ha-1-content-it
+  properties:
+    properties:
+      disks:
+      - autoDelete: true
+        boot: true
+        deviceName: boot
+        initializeParams:
+          diskSizeGb: 10
+          diskType: pd-standard
+          sourceImage: https://www.googleapis.com/compute/v1/projects/click-to-deploy-images/global/images/wordpress-ha-v20210711
+        type: PERSISTENT
+      machineType: g1-small
+      metadata:
+        items:
+        - key: deployment
+          value: wordpress-ha-1
+        - key: wordpress-mysql-password
+          value: HQmvsUVbb3EbPz
+        - key: wordpress-admin-password
+          value: AXg8PStaP5HGoj
+        - key: wordpress-admin-email
+          value: rladso@yahoo.com
+        - key: wordpress-enable-multisite
+          value: false
+        - key: cloudsql-connection-ip
+          value: $(ref.wordpress-ha-1-sql-proxy-fr.IPAddress)
+        - key: bucket-name
+          value: $(ref.wordpress-ha-1-121070127883-wp-data.name)
+        - key: service-account-name
+          value: wordpress-ha-1-svc-account@college-funding-consultant.iam.gserviceaccount.com
+        - key: service-account-key-base-64
+          value: $(ref.wordpress-ha-1-svc-account-key.privateKeyData)
+        - key: rtc-name
+          value: wordpress-ha-1-rtc
+        - key: ip-variable-name
+          value: ipaddress
+        - key: ip-var-wait-timeout
+          value: 300
+        - key: lb-wait-timeout
+          value: 1500
+        - key: status-config-url
+          value: https://runtimeconfig.googleapis.com/v1beta1/projects/college-funding-consultant/configs/wordpress-ha-1-rtc
+        - key: status-variable-path
+          value: startup-status
+        - key: is-admin-node
+          value: false
+        - key: admin-waiter-name
+          value: wordpress-ha-1-rtc-admin-waiter
+      networkInterfaces:
+      - accessConfigs:
+        - name: External-IP
+          type: ONE_TO_ONE_NAT
+        network: https://www.googleapis.com/compute/v1/projects/college-funding-consultant/global/networks/default
+      serviceAccounts:
+      - email: default
+        scopes:
+        - https://www.googleapis.com/auth/cloudruntimeconfig
+      tags:
+        items:
+        - wordpress-ha-1-tcp-80
+        - wordpress-ha-1-sql-client
+    zone: us-central1-c
+  type: compute.v1.instanceTemplate
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-sql-proxy-fr
+    - wordpress-ha-1-121070127883-wp-data
+    - wordpress-ha-1-svc-account-key
+- metadata:
+    dependsOn:
+    - wordpress-ha-1-sql-wordpress-user
+    - wordpress-ha-1-svc-account-key
+    - wordpress-ha-1-121070127883-wp-data
+    - wordpress-ha-1-content-health
+    - wordpress-ha-1-content-it
+  name: wordpress-ha-1-content-igm
+  properties:
+    autoHealingPolicies:
+    - healthCheck: $(ref.wordpress-ha-1-content-health.selfLink)
+      initialDelaySec: 180
+    baseInstanceName: wordpress-ha-1-content-vm
+    instanceTemplate: $(ref.wordpress-ha-1-content-it.selfLink)
+    namedPorts:
+    - name: http
+      port: 80
+    targetSize: 2
+    zone: us-central1-c
+  type: compute.beta.instanceGroupManager
+- name: wordpress-ha-1-content-autoscaler
+  properties:
+    autoscalingPolicy:
+      coolDownPeriodSec: 90
+      cpuUtilization:
+        utilizationTarget: 0.75
+      maxNumReplicas: 10
+    target: $(ref.wordpress-ha-1-content-igm.selfLink)
+    zone: us-central1-c
+  type: compute.v1.autoscaler
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-content-igm
+- name: wordpress-ha-1-content-autoheal
+  properties:
+    checkIntervalSec: 30
+    port: 80
+    portName: http
+    requestPath: /
+    timeoutSec: 30
+    unhealthyThreshold: 4
+  type: compute.v1.httpHealthCheck
+- name: wordpress-ha-1-content-health
+  properties:
+    checkIntervalSec: 10
+    port: 80
+    portName: http
+    requestPath: /
+    timeoutSec: 10
+    unhealthyThreshold: 2
+  type: compute.v1.httpHealthCheck
+- name: wordpress-ha-1-content-backend
+  properties:
+    affinityCookieTtlSec: 0
+    backends:
+    - balacingMode: RATE
+      group: $(ref.wordpress-ha-1-content-igm.instanceGroup)
+    healthChecks:
+    - $(ref.wordpress-ha-1-content-health.selfLink)
+    loadBalancingScheme: EXTERNAL
+    sessionAffinity: GENERATED_COOKIE
+  type: compute.v1.backendService
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-content-igm
+    - wordpress-ha-1-content-health
+- name: wordpress-ha-1-firewall-80
+  properties:
+    allowed:
+    - IPProtocol: TCP
+      ports:
+      - '80'
+    sourceRanges:
+    - 0.0.0.0/0
+    targetTags:
+    - wordpress-ha-1-tcp-80
+  type: compute.v1.firewall
+- name: wordpress-ha-1-lb-urlmap
+  properties:
+    defaultService: $(ref.wordpress-ha-1-content-backend.selfLink)
+    hostRules:
+    - hosts:
+      - '*'
+      pathMatcher: pathmap
+    pathMatchers:
+    - defaultService: $(ref.wordpress-ha-1-content-backend.selfLink)
+      name: pathmap
+      pathRules:
+      - paths:
+        - /*
+        service: $(ref.wordpress-ha-1-content-backend.selfLink)
+      - paths:
+        - /wp-admin/*
+        service: $(ref.wordpress-ha-1-admin-backend.selfLink)
+      - paths:
+        - /wp-login.php
+        service: $(ref.wordpress-ha-1-admin-backend.selfLink)
+  type: compute.v1.urlMap
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-content-backend
+    - wordpress-ha-1-admin-backend
+- name: wordpress-ha-1-lb-targetproxy
+  properties:
+    urlMap: $(ref.wordpress-ha-1-lb-urlmap.selfLink)
+  type: compute.v1.targetHttpProxy
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-lb-urlmap
+- name: wordpress-ha-1-lb-forwarding-rule
+  properties:
+    IPProtocol: TCP
+    portRange: 80
+    target: $(ref.wordpress-ha-1-lb-targetproxy.selfLink)
+  type: compute.v1.globalForwardingRule
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-lb-targetproxy
+- name: wordpress-ha-1-rtc
+  properties:
+    config: wordpress-ha-1-rtc
+  type: runtimeconfig.v1beta1.config
+- name: wordpress-ha-1-rtc-ip-variable
+  properties:
+    parent: $(ref.wordpress-ha-1-rtc.name)
+    text: $(ref.wordpress-ha-1-lb-forwarding-rule.IPAddress)
+    variable: ipaddress
+  type: runtimeconfig.v1beta1.variable
+  metadata:
+    dependsOn:
+    - wordpress-ha-1-rtc
+    - wordpress-ha-1-lb-forwarding-rule
+- metadata:
+    dependsOn:
+    - wordpress-ha-1-rtc
+    - wordpress-ha-1-admin-igm
+  name: wordpress-ha-1-rtc-admin-waiter
+  properties:
+    failure:
+      cardinality:
+        number: 1
+        path: admin-status/failure
+    parent: $(ref.wordpress-ha-1-rtc.name)
+    success:
+      cardinality:
+        number: 1
+        path: admin-status/success
+    timeout: 2000s
+    waiter: wordpress-ha-1-rtc-admin-waiter
+  type: runtimeconfig.v1beta1.waiter
+- metadata:
+    dependsOn:
+    - wordpress-ha-1-rtc
+    - wordpress-ha-1-admin-igm
+    - wordpress-ha-1-content-igm
+    - wordpress-ha-1-sql-proxy-igm
+    - wordpress-ha-1-rtc-ip-variable
+  name: wordpress-ha-1-rtc-waiter
+  properties:
+    failure:
+      cardinality:
+        number: 1
+        path: startup-status/failure
+    parent: $(ref.wordpress-ha-1-rtc.name)
+    success:
+      cardinality:
+        number: 1
+        path: startup-status/success
+    timeout: 2000s
+    waiter: wordpress-ha-1-rtc-waiter
+  type: runtimeconfig.v1beta1.waiter

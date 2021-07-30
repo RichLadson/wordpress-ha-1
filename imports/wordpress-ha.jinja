@@ -1,0 +1,167 @@
+{% set deployment = env['deployment'] %}
+{% set project = env['project'] %}
+{% set projectNumber = env['project_number'] %}
+{% set zone = properties['zone'] %}
+{% set contentNodeMachineType = properties['contentNodeMachineType'] %}
+{% set adminNodeMachineType = properties['adminNodeMachineType'] %}
+{% set dbMachineType = properties['dbMachineType'] %}
+{% set dbProxyMachineType = properties['contentNodeMachineType'] %}
+{% set network = properties['network'] %}
+{% set instancegroupTargetSize = properties['instancegroupTargetSize'] %}
+{% set maxNumReplicas = properties['maxNumReplicas'] %}
+{% set diskType = properties['diskType'] %}
+{% set dbDataDiskType = properties['dbDataDiskType'] %}
+{% set bootDiskSizeGb = properties['bootDiskSizeGb'] %}
+{% set docRootDiskSizeGb = properties['docRootDiskSizeGb'] %}
+{% set dbDataDiskSizeGb = properties['dbDataDiskSizeGb'] %}
+{% set dbFailoverEnabled = properties['dbFailoverEnabled'] %}
+{% set wordpressAdminEmail = properties['wordpressAdminEmail'] %}
+{% set inputEnableMultisite = properties['inputEnableMultisite'] %}
+{% set ipVarWaitTimeout = 300 %}
+{% set loadBalancerWaitTimeout = 1500 %}
+{% set waiterTimeout = 2000 %}
+{% set sourceImage = 'https://www.googleapis.com/compute/v1/projects/click-to-deploy-images/global/images/wordpress-ha-v20210711' %}
+
+resources:
+# WordPress admin user password
+- name: wordpress-admin-password
+  type: password.py
+  properties:
+    length: 14
+    includeSymbols: false
+
+# Service account
+- name: {{ deployment }}-svc-account
+  type: iam.v1.serviceAccount
+  properties:
+    accountId: {{ deployment }}-svc-account
+    displayName: {{ deployment }}-svc-account
+
+# Service account key
+- name: {{ deployment }}-svc-account-key
+  type: iam.v1.serviceAccounts.key
+  metadata:
+    dependsOn:
+    - {{ deployment }}-svc-account
+  properties:
+    parent: $(ref.{{ deployment }}-svc-account.name)
+    privateKeyType: TYPE_GOOGLE_CREDENTIALS_FILE
+
+# Bucket for syncing content /var/www/html between admin and content nodes
+- name: {{ deployment }}-{{ projectNumber }}-wp-data
+  type: storage.v1.bucket
+  metadata:
+    dependsOn:
+    - {{ deployment }}-svc-account
+  properties:
+    name: {{ deployment }}-{{ projectNumber }}-wp-data
+  accessControl:
+    gcpIamPolicy:
+      bindings:
+      - role: roles/storage.admin
+        members:
+        - serviceAccount:{{ deployment }}-svc-account@{{ project }}.iam.gserviceaccount.com
+        - serviceAccount:{{ projectNumber }}@cloudbuild.gserviceaccount.com
+
+# Cloud SQL resources
+- name: {{ deployment }}-cloudsql
+  type: database.jinja
+  properties:
+    deployment: {{ deployment }}
+    dbMachineType: {{ dbMachineType }}
+    dbDataDiskSizeGb: {{ dbDataDiskSizeGb }}
+    dbDataDiskType: {{ dbDataDiskType }}
+    dbFailoverEnabled: {{ dbFailoverEnabled }}
+
+# Cloud SQL database proxy
+- name: {{ deployment }}-cloudsql-proxy
+  type: database-proxy.jinja
+  properties:
+    zone: {{ zone }}
+    network: {{ network }}
+    cloudsqlConnectionName: $(ref.{{ deployment }}-cloudsql.connectionName)
+    rtcName: {{ deployment }}-rtc
+    dbProxyMachineType: {{ dbProxyMachineType }}
+    maxNumReplicas: {{ maxNumReplicas }}
+
+# Admin node resources
+- name: {{ deployment }}-admin-node
+  type: admin_node.jinja
+  properties:
+    deployment: {{ deployment }}
+    zone: {{ zone }}
+    project: {{ project }}
+    sourceImage: {{ sourceImage }}
+    adminNodeMachineType: {{ adminNodeMachineType }}
+    network: {{ network }}
+    bootDiskSizeGb: {{ bootDiskSizeGb }}
+    diskType: {{ diskType }}
+    wordpressSqlPassword: $(ref.{{ deployment }}-cloudsql.wordpress-sql-password)
+    wordpressAdminPassword: $(ref.wordpress-admin-password.password)
+    wordpressAdminEmail: {{ wordpressAdminEmail }}
+    inputEnableMultisite: {{ inputEnableMultisite }}
+    cloudsqlConnectionIP: $(ref.{{ deployment }}-cloudsql-proxy.connectionIP)
+    bucketName: $(ref.{{ deployment}}-{{ projectNumber }}-wp-data.name)
+    svcAccountName: {{ deployment }}-svc-account@{{ project }}.iam.gserviceaccount.com
+    svcAccountKeyBase64: $(ref.{{ deployment }}-svc-account-key.privateKeyData)
+    rtcName: {{ deployment }}-rtc
+    ipVariableName: ipaddress
+    ipVarWaitTimeout: {{ ipVarWaitTimeout }}
+    loadBalancerWaitTimeout: {{ loadBalancerWaitTimeout }}
+
+
+# Content node resources
+- name: {{ deployment }}-content-nodes
+  type: content_nodes.jinja
+  properties:
+    deployment: {{ deployment }}
+    zone: {{ zone }}
+    project: {{ project }}
+    sourceImage: {{ sourceImage }}
+    contentNodeMachineType: {{ contentNodeMachineType }}
+    instancegroupTargetSize: {{ instancegroupTargetSize }}
+    maxNumReplicas: {{ maxNumReplicas }}
+    network: {{ network }}
+    bootDiskSizeGb: {{ bootDiskSizeGb }}
+    diskType: {{ diskType }}
+    wordpressSqlPassword: $(ref.{{ deployment }}-cloudsql.wordpress-sql-password)
+    wordpressAdminPassword: $(ref.wordpress-admin-password.password)
+    wordpressAdminEmail: {{ wordpressAdminEmail }}
+    inputEnableMultisite: {{ inputEnableMultisite }}
+    cloudsqlConnectionIP: $(ref.{{ deployment }}-cloudsql-proxy.connectionIP)
+    bucketName: $(ref.{{ deployment }}-{{ projectNumber }}-wp-data.name)
+    svcAccountName: {{ deployment }}-svc-account@{{ project }}.iam.gserviceaccount.com
+    svcAccountKeyBase64: $(ref.{{ deployment }}-svc-account-key.privateKeyData)
+    rtcName: {{ deployment }}-rtc
+    ipVariableName: ipaddress
+    ipVarWaitTimeout: {{ ipVarWaitTimeout }}
+    loadBalancerWaitTimeout: {{ loadBalancerWaitTimeout }}
+
+# Networking resources
+- name: {{ deployment }}-networking
+  type: networking.jinja
+  properties:
+    deployment: {{ deployment }}
+    adminBackendSelfLink: $(ref.{{ deployment }}-admin-node.backendSelfLink)
+    contentBackendSelfLink: $(ref.{{ deployment }}-content-nodes.backendSelfLink)
+
+# Runtimeconfig resources
+- name: {{ deployment }}-runtimeconfig
+  type: runtimeconfig.jinja
+  properties:
+    deployment: {{ deployment }}
+    waiterTimeout: {{ waiterTimeout }}
+
+outputs:
+  - name: deployment
+    value: {{ deployment }}
+  - name: ip
+    value: $(ref.{{ deployment }}-runtimeconfig.globalIp)
+  - name: wordpressAdminEmail
+    value: {{ wordpressAdminEmail }}
+  - name: wordpressAdminPassword
+    value: $(ref.wordpress-admin-password.password)
+  - name: cloudsqlUserPassword
+    value: $(ref.{{ deployment }}-cloudsql.wordpress-sql-password)
+  - name: bucketName
+    value: $(ref.{{ deployment }}-{{ projectNumber }}-wp-data.name)

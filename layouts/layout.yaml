@@ -1,0 +1,239 @@
+resources:
+- name: wordpress-ha
+  outputs:
+  - finalValue: wordpress-ha-1
+    name: deployment
+    value: wordpress-ha-1
+  - finalValue: 34.120.155.244
+    name: ip
+    value: $(ref.wordpress-ha-1-runtimeconfig.globalIp)
+  - finalValue: rladso@yahoo.com
+    name: wordpressAdminEmail
+    value: rladso@yahoo.com
+  - finalValue: AXg8PStaP5HGoj
+    name: wordpressAdminPassword
+    value: $(ref.wordpress-admin-password.password)
+  - finalValue: HQmvsUVbb3EbPz
+    name: cloudsqlUserPassword
+    value: $(ref.wordpress-ha-1-cloudsql.wordpress-sql-password)
+  - finalValue: wordpress-ha-1-121070127883-wp-data
+    name: bucketName
+    value: $(ref.wordpress-ha-1-121070127883-wp-data.name)
+  properties:
+    adminNodeMachineType: g1-small
+    bootDiskSizeGb: 10
+    cloudBuilderApiEnabled: true
+    cloudSqlApiEnabled: true
+    contentNodeMachineType: g1-small
+    dbDataDiskSizeGb: 10
+    dbDataDiskType: PD_HDD
+    dbFailoverEnabled: true
+    dbMachineType: db-f1-micro
+    diskType: pd-standard
+    docRootDiskSizeGb: 10
+    iamApiEnabled: true
+    inputEnableMultisite: false
+    instancegroupTargetSize: 2
+    maxNumReplicas: 10
+    network: default
+    subnetwork: default
+    wordpressAdminEmail: rladso@yahoo.com
+    zone: us-central1-c
+  resources:
+  - name: wordpress-admin-password
+    outputs:
+    - finalValue: AXg8PStaP5HGoj
+      name: password
+      value: AXg8PStaP5HGoj
+    type: password.py
+  - name: wordpress-ha-1-svc-account
+    type: iam.v1.serviceAccount
+  - name: wordpress-ha-1-svc-account-key
+    type: iam.v1.serviceAccounts.key
+  - name: wordpress-ha-1-121070127883-wp-data
+    type: storage.v1.bucket
+  - name: wordpress-ha-1-cloudsql
+    outputs:
+    - finalValue: college-funding-consultant:us-central1:wordpress-ha-1-sql
+      name: connectionName
+      value: $(ref.wordpress-ha-1-sql.connectionName)
+    - finalValue: HQmvsUVbb3EbPz
+      name: wordpress-sql-password
+      value: $(ref.wordpress-sql-password.password)
+    - finalValue: p8W2M358Qsw9t5
+      name: wordpress-root-password
+      value: $(ref.wordpress-root-password.password)
+    properties:
+      dbDataDiskSizeGb: 10
+      dbDataDiskType: PD_HDD
+      dbFailoverEnabled: true
+      dbMachineType: db-f1-micro
+      deployment: wordpress-ha-1
+    resources:
+    - name: wordpress-ha-1-sql
+      type: sqladmin.v1beta4.instance
+    - name: wordpress-ha-1-sql-failover
+      type: sqladmin.v1beta4.instance
+    - name: wordpress-ha-1-database
+      type: sqladmin.v1beta4.database
+    - name: wordpress-ha-1-sql-wordpress-user
+      type: sqladmin.v1beta4.user
+    - name: wordpress-root-password
+      outputs:
+      - finalValue: p8W2M358Qsw9t5
+        name: password
+        value: p8W2M358Qsw9t5
+      type: password.py
+    - name: wordpress-sql-password
+      outputs:
+      - finalValue: HQmvsUVbb3EbPz
+        name: password
+        value: HQmvsUVbb3EbPz
+      type: password.py
+    type: database.jinja
+  - name: wordpress-ha-1-cloudsql-proxy
+    outputs:
+    - finalValue: 10.128.0.5
+      name: connectionIP
+      value: $(ref.wordpress-ha-1-sql-proxy-fr.IPAddress)
+    properties:
+      cloudsqlConnectionName: $(ref.wordpress-ha-1-cloudsql.connectionName)
+      dbProxyMachineType: g1-small
+      maxNumReplicas: 10
+      network: default
+      rtcName: wordpress-ha-1-rtc
+      zone: us-central1-c
+    resources:
+    - name: wordpress-ha-1-sql-proxy-it
+      type: compute.v1.instanceTemplate
+    - name: wordpress-ha-1-sql-proxy-autoheal
+      type: compute.beta.healthCheck
+    - name: wordpress-ha-1-sql-proxy-igm
+      type: compute.beta.instanceGroupManager
+    - name: wordpress-ha-1-sql-proxy-autoscaler
+      type: compute.v1.autoscaler
+    - name: wordpress-ha-1-sql-proxy-health-fw
+      type: compute.v1.firewall
+    - name: wordpress-ha-1-sql-proxy-client-fw
+      type: compute.v1.firewall
+    - name: wordpress-ha-1-sql-proxy-health
+      type: compute.beta.healthCheck
+    - name: wordpress-ha-1-sql-proxy-bs
+      type: compute.v1.regionBackendService
+    - name: wordpress-ha-1-sql-proxy-fr
+      type: compute.v1.forwardingRule
+    type: database-proxy.jinja
+  - name: wordpress-ha-1-admin-node
+    outputs:
+    - finalValue: https://www.googleapis.com/compute/v1/projects/college-funding-consultant/global/backendServices/wordpress-ha-1-admin-backend
+      name: backendSelfLink
+      value: $(ref.wordpress-ha-1-admin-backend.selfLink)
+    properties:
+      adminNodeMachineType: g1-small
+      bootDiskSizeGb: 10
+      bucketName: $(ref.wordpress-ha-1-121070127883-wp-data.name)
+      cloudsqlConnectionIP: $(ref.wordpress-ha-1-cloudsql-proxy.connectionIP)
+      deployment: wordpress-ha-1
+      diskType: pd-standard
+      inputEnableMultisite: false
+      ipVarWaitTimeout: 300
+      ipVariableName: ipaddress
+      loadBalancerWaitTimeout: 1500
+      network: default
+      project: college-funding-consultant
+      rtcName: wordpress-ha-1-rtc
+      sourceImage: https://www.googleapis.com/compute/v1/projects/click-to-deploy-images/global/images/wordpress-ha-v20210711
+      svcAccountKeyBase64: $(ref.wordpress-ha-1-svc-account-key.privateKeyData)
+      svcAccountName: wordpress-ha-1-svc-account@college-funding-consultant.iam.gserviceaccount.com
+      wordpressAdminEmail: rladso@yahoo.com
+      wordpressAdminPassword: (redacted)
+      wordpressSqlPassword: (redacted)
+      zone: us-central1-c
+    resources:
+    - name: wordpress-ha-1-admin-it
+      type: compute.v1.instanceTemplate
+    - name: wordpress-ha-1-admin-igm
+      type: compute.beta.instanceGroupManager
+    - name: wordpress-ha-1-admin-autoheal
+      type: compute.v1.httpHealthCheck
+    - name: wordpress-ha-1-admin-health
+      type: compute.v1.httpHealthCheck
+    - name: wordpress-ha-1-admin-backend
+      type: compute.v1.backendService
+    type: admin_node.jinja
+  - name: wordpress-ha-1-content-nodes
+    outputs:
+    - finalValue: https://www.googleapis.com/compute/v1/projects/college-funding-consultant/global/backendServices/wordpress-ha-1-content-backend
+      name: backendSelfLink
+      value: $(ref.wordpress-ha-1-content-backend.selfLink)
+    properties:
+      bootDiskSizeGb: 10
+      bucketName: $(ref.wordpress-ha-1-121070127883-wp-data.name)
+      cloudsqlConnectionIP: $(ref.wordpress-ha-1-cloudsql-proxy.connectionIP)
+      contentNodeMachineType: g1-small
+      deployment: wordpress-ha-1
+      diskType: pd-standard
+      inputEnableMultisite: false
+      instancegroupTargetSize: 2
+      ipVarWaitTimeout: 300
+      ipVariableName: ipaddress
+      loadBalancerWaitTimeout: 1500
+      maxNumReplicas: 10
+      network: default
+      project: college-funding-consultant
+      rtcName: wordpress-ha-1-rtc
+      sourceImage: https://www.googleapis.com/compute/v1/projects/click-to-deploy-images/global/images/wordpress-ha-v20210711
+      svcAccountKeyBase64: $(ref.wordpress-ha-1-svc-account-key.privateKeyData)
+      svcAccountName: wordpress-ha-1-svc-account@college-funding-consultant.iam.gserviceaccount.com
+      wordpressAdminEmail: rladso@yahoo.com
+      wordpressAdminPassword: (redacted)
+      wordpressSqlPassword: (redacted)
+      zone: us-central1-c
+    resources:
+    - name: wordpress-ha-1-content-it
+      type: compute.v1.instanceTemplate
+    - name: wordpress-ha-1-content-igm
+      type: compute.beta.instanceGroupManager
+    - name: wordpress-ha-1-content-autoscaler
+      type: compute.v1.autoscaler
+    - name: wordpress-ha-1-content-autoheal
+      type: compute.v1.httpHealthCheck
+    - name: wordpress-ha-1-content-health
+      type: compute.v1.httpHealthCheck
+    - name: wordpress-ha-1-content-backend
+      type: compute.v1.backendService
+    type: content_nodes.jinja
+  - name: wordpress-ha-1-networking
+    properties:
+      adminBackendSelfLink: $(ref.wordpress-ha-1-admin-node.backendSelfLink)
+      contentBackendSelfLink: $(ref.wordpress-ha-1-content-nodes.backendSelfLink)
+      deployment: wordpress-ha-1
+    resources:
+    - name: wordpress-ha-1-firewall-80
+      type: compute.v1.firewall
+    - name: wordpress-ha-1-lb-urlmap
+      type: compute.v1.urlMap
+    - name: wordpress-ha-1-lb-targetproxy
+      type: compute.v1.targetHttpProxy
+    - name: wordpress-ha-1-lb-forwarding-rule
+      type: compute.v1.globalForwardingRule
+    type: networking.jinja
+  - name: wordpress-ha-1-runtimeconfig
+    outputs:
+    - finalValue: 34.120.155.244
+      name: globalIp
+      value: $(ref.wordpress-ha-1-rtc-ip-variable.text)
+    properties:
+      deployment: wordpress-ha-1
+      waiterTimeout: 2000
+    resources:
+    - name: wordpress-ha-1-rtc
+      type: runtimeconfig.v1beta1.config
+    - name: wordpress-ha-1-rtc-ip-variable
+      type: runtimeconfig.v1beta1.variable
+    - name: wordpress-ha-1-rtc-admin-waiter
+      type: runtimeconfig.v1beta1.waiter
+    - name: wordpress-ha-1-rtc-waiter
+      type: runtimeconfig.v1beta1.waiter
+    type: runtimeconfig.jinja
+  type: wordpress-ha.jinja

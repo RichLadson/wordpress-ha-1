@@ -1,0 +1,11 @@
+imports:
+- path: wordpress-ha.jinja
+
+resources:
+- name: wordpress-ha
+  type: wordpress-ha.jinja
+  properties:
+    wordpressAdminEmail: user@example.com
+    iamApiEnabled: True
+    cloudSqlApiEnabled: True
+    cloudBuilderApiEnabled: True

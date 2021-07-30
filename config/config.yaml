@@ -1,0 +1,30 @@
+{
+  "imports": [{
+    "path": "wordpress-ha.jinja"
+  }],
+  "resources": [{
+    "name": "wordpress-ha",
+    "type": "wordpress-ha.jinja",
+    "properties": {
+      "zone": "us-central1-c",
+      "contentNodeMachineType": "g1-small",
+      "adminNodeMachineType": "g1-small",
+      "diskType": "pd-standard",
+      "bootDiskSizeGb": 10.0,
+      "wordpressAdminEmail": "rladso@yahoo.com",
+      "inputEnableMultisite": false,
+      "instancegroupTargetSize": 2.0,
+      "maxNumReplicas": 10.0,
+      "docRootDiskSizeGb": 10.0,
+      "iamApiEnabled": true,
+      "cloudSqlApiEnabled": true,
+      "cloudBuilderApiEnabled": true,
+      "dbMachineType": "db-f1-micro",
+      "dbDataDiskType": "PD_HDD",
+      "dbDataDiskSizeGb": 10.0,
+      "dbFailoverEnabled": true,
+      "network": "default",
+      "subnetwork": "default"
+    }
+  }]
+}

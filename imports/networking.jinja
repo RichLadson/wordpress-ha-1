@@ -1,0 +1,48 @@
+{% set deployment = properties['deployment'] %}
+{% set adminBackendSelfLink = properties['adminBackendSelfLink'] %}
+{% set contentBackendSelfLink = properties['contentBackendSelfLink'] %}
+
+resources:
+# Port 80 firewall
+- name: {{ deployment }}-firewall-80
+  type: compute.v1.firewall
+  properties:
+    allowed:
+    - IPProtocol: TCP
+      ports:
+      - '80'
+    sourceRanges:
+    - 0.0.0.0/0
+    targetTags:
+    - {{ deployment }}-tcp-80
+
+# Load Balancer
+- name: {{ deployment }}-lb-urlmap
+  type: compute.v1.urlMap
+  properties:
+    defaultService: {{ contentBackendSelfLink }}
+    hostRules:
+      - hosts: ["*"]
+        pathMatcher: pathmap
+    pathMatchers:
+      - name: pathmap
+        defaultService: {{ contentBackendSelfLink }}
+        pathRules:
+          - paths: ["/*"]
+            service: {{ contentBackendSelfLink }}
+          - paths: ["/wp-admin/*"]
+            service: {{ adminBackendSelfLink }}
+          - paths: ["/wp-login.php"]
+            service: {{ adminBackendSelfLink }}
+
+- name: {{ deployment }}-lb-targetproxy
+  type: compute.v1.targetHttpProxy
+  properties:
+    urlMap: $(ref.{{ deployment }}-lb-urlmap.selfLink)
+
+- name: {{ deployment }}-lb-forwarding-rule
+  type: compute.v1.globalForwardingRule
+  properties:
+    IPProtocol: TCP
+    portRange: 80
+    target: $(ref.{{ deployment }}-lb-targetproxy.selfLink)

@@ -1,0 +1,7 @@
+{
+  "defaultDeploymentType": "MULTI_VM",
+  "imageName": "wordpress-ha-v20210711",
+  "projectId": "click-to-deploy-images",
+  "templateName": "wordpress-ha",
+  "useSolutionPackage": true
+}

@@ -1,0 +1,180 @@
+{% set deployment = env['deployment'] %}
+{% set project = env['project'] %}
+
+{% set zone = properties['zone'] %}
+{% set region = zone[:-2] %}
+
+{% set network = properties['network'] %}
+{% set cloudsqlConnectionName = properties['cloudsqlConnectionName'] %}
+{% set rtcName = properties['rtcName'] %}
+
+{% set dbProxyMachineType = properties['dbProxyMachineType'] %}
+{% set maxNumReplicas = properties['maxNumReplicas'] %}
+
+{% set sourceImage = 'https://www.googleapis.com/compute/v1/projects/click-to-deploy-images/global/images/cloudsql-v20210711' %}
+{% set bootDiskSizeGb = '10' %}
+{% set diskType = 'pd-standard' %}
+
+resources:
+# SQL Proxy Instance template
+- name: {{ deployment }}-sql-proxy-it
+  type: compute.v1.instanceTemplate
+  properties:
+    zone: {{ zone }}
+    properties:
+      machineType: {{ dbProxyMachineType }}
+      networkInterfaces:
+      - network: https://www.googleapis.com/compute/v1/projects/{{ project }}/global/networks/{{ network }}
+        accessConfigs:
+        - name: External-IP
+          type: ONE_TO_ONE_NAT
+      disks:
+      - deviceName: boot
+        type: PERSISTENT
+        boot: true
+        autoDelete: true
+        initializeParams:
+          sourceImage: {{ sourceImage }}
+          diskSizeGb: {{ bootDiskSizeGb }}
+          diskType: {{ diskType }}
+      metadata:
+        items:
+          - key: deployment
+            value: {{ deployment }}
+          - key: cloudsql-connection-name
+            value: {{ cloudsqlConnectionName }}
+          - key: rtc-name
+            value: {{ rtcName }}
+          - key: status-config-url
+            value: https://runtimeconfig.googleapis.com/v1beta1/projects/{{ project }}/configs/{{ rtcName }}
+          - key: status-variable-path
+            value: sql-proxy-startup-status
+          - key: startup-script
+            value: |
+              #!/bin/bash
+              sysctl -w net.ipv4.conf.eth0.route_localnet=1
+              iptables -t nat -A PREROUTING \
+                -ptcp -i eth0 --dport 3306 \
+                -j DNAT --to 127.0.0.1:3306
+      tags:
+        items:
+          - {{ deployment }}-sql-proxy
+      serviceAccounts:
+        - email: default
+          scopes:
+            - 'https://www.googleapis.com/auth/sqlservice.admin'
+            - 'https://www.googleapis.com/auth/cloudruntimeconfig'
+
+
+# SQL Proxy Health Check
+- name: {{ deployment }}-sql-proxy-autoheal
+  type: compute.beta.healthCheck
+  properties:
+    checkIntervalSec: 5
+    timeoutSec: 5
+    unhealthyThreshold: 5
+    type: TCP
+    tcpHealthCheck:
+      port: 3306
+
+
+# SQL Proxy Instance Group Manager
+- name: {{ deployment }}-sql-proxy-igm
+  type: compute.beta.instanceGroupManager
+  properties:
+    baseInstanceName: {{ deployment }}-sql-proxy-vm
+    instanceTemplate: $(ref.{{ deployment }}-sql-proxy-it.selfLink)
+    targetSize: 1
+    zone: {{ zone }}
+    namedPorts:
+      - name: 'mysql'
+        port: 3306
+    autoHealingPolicies:
+      - healthCheck: $(ref.{{ deployment }}-sql-proxy-autoheal.selfLink)
+        initialDelaySec: 120
+
+
+# SQL Proxy Autoscaler
+- name: {{ deployment }}-sql-proxy-autoscaler
+  type: compute.v1.autoscaler
+  properties:
+    zone: {{ zone }}
+    target: $(ref.{{ deployment }}-sql-proxy-igm.selfLink)
+    autoscalingPolicy:
+      maxNumReplicas: {{ maxNumReplicas }}
+      cpuUtilization:
+        utilizationTarget: 0.75
+      coolDownPeriodSec: 90
+
+
+# Port 3306 firewall for health checks
+- name: {{ deployment }}-sql-proxy-health-fw
+  type: compute.v1.firewall
+  properties:
+    allowed:
+    - IPProtocol: TCP
+      ports:
+      - '3306'
+    sourceRanges:
+    # source ranges according to:
+    # https://cloud.google.com/compute/docs/load-balancing/health-checks
+    - 130.211.0.0/22
+    - 35.191.0.0/16
+    targetTags:
+    - {{ deployment }}-sql-proxy
+
+
+# Port 3306 firewall for database client connections
+- name: {{ deployment }}-sql-proxy-client-fw
+  type: compute.v1.firewall
+  properties:
+    allowed:
+    - IPProtocol: TCP
+      ports:
+      - '3306'
+    sourceTags:
+    - {{ deployment }}-sql-client
+    targetTags:
+    - {{ deployment }}-sql-proxy
+
+
+# SQL Proxy Health Check
+- name: {{ deployment }}-sql-proxy-health
+  type: compute.beta.healthCheck
+  properties:
+    checkIntervalSec: 10
+    timeoutSec: 10
+    unhealthyThreshold: 2
+    type: TCP
+    tcpHealthCheck:
+      port: 3306
+
+
+# SQL Proxy Backend Service
+- name: {{ deployment }}-sql-proxy-bs
+  type: compute.v1.regionBackendService
+  properties:
+    region: {{ region }}
+    protocol: TCP
+    loadBalancingScheme: INTERNAL
+    healthChecks: [ $(ref.{{ deployment }}-sql-proxy-health.selfLink) ]
+    backends:
+      - balacingMode: RATE
+        group: $(ref.{{ deployment }}-sql-proxy-igm.instanceGroup)
+
+
+# SQL Proxy Frontend
+- name: {{ deployment }}-sql-proxy-fr
+  type: compute.v1.forwardingRule
+  properties:
+    region: {{ region }}
+    IPProtocol: TCP
+    ports:
+    - '3306'
+    loadBalancingScheme: INTERNAL
+    backendService: $(ref.{{ deployment }}-sql-proxy-bs.selfLink)
+
+
+outputs:
+  - name: connectionIP
+    value: $(ref.{{ deployment }}-sql-proxy-fr.IPAddress)

@@ -1,0 +1,153 @@
+{% set deployment = properties['deployment'] %}
+{% set zone = properties['zone'] %}
+{% set project = properties['project'] %}
+{% set projectNumber = env['project_number'] %}
+{% set sourceImage = properties['sourceImage'] %}
+{% set adminNodeMachineType = properties['adminNodeMachineType'] %}
+{% set network = properties['network'] %}
+{% set bootDiskSizeGb = properties['bootDiskSizeGb'] %}
+{% set diskType = properties['diskType'] %}
+{% set wordpressSqlPassword = properties['wordpressSqlPassword'] %}
+{% set wordpressAdminPassword = properties['wordpressAdminPassword'] %}
+{% set wordpressAdminEmail = properties['wordpressAdminEmail'] %}
+{% set inputEnableMultisite = properties['inputEnableMultisite'] %}
+{% set cloudsqlConnectionIP = properties['cloudsqlConnectionIP'] %}
+{% set bucketName = properties['bucketName'] %}
+{% set startupScriptUrl = properties['startupScriptUrl'] %}
+{% set gcsSyncScriptUrl = properties['gcsSyncScriptUrl'] %}
+{% set svcAccountName = properties['svcAccountName'] %}
+{% set svcAccountKeyBase64 = properties['svcAccountKeyBase64'] %}
+{% set rtcName = properties['rtcName'] %}
+{% set ipVariableName = properties['ipVariableName'] %}
+{% set ipVarWaitTimeout = properties['ipVarWaitTimeout'] %}
+{% set loadBalancerWaitTimeout = properties['loadBalancerWaitTimeout'] %}
+
+resources:
+# Admin Instance template
+- name: {{ deployment }}-admin-it
+  type: compute.v1.instanceTemplate
+  metadata:
+    dependsOn:
+    - {{ deployment }}-rtc
+  properties:
+    zone: {{ zone }}
+    properties:
+      machineType: {{ adminNodeMachineType }}
+      networkInterfaces:
+      - network: https://www.googleapis.com/compute/v1/projects/{{ project }}/global/networks/{{ network }}
+        accessConfigs:
+        - name: External-IP
+          type: ONE_TO_ONE_NAT
+      disks:
+      - deviceName: boot
+        type: PERSISTENT
+        boot: true
+        autoDelete: true
+        initializeParams:
+          sourceImage: {{ sourceImage }}
+          diskSizeGb: {{ bootDiskSizeGb }}
+          diskType: {{ diskType }}
+      metadata:
+        items:
+          - key: deployment
+            value: {{ deployment }}
+          - key: wordpress-mysql-password
+            value: {{ wordpressSqlPassword }}
+          - key: wordpress-admin-password
+            value: {{ wordpressAdminPassword }}
+          - key: wordpress-admin-email
+            value: {{ wordpressAdminEmail }}
+          - key: wordpress-enable-multisite
+            value: {{ inputEnableMultisite }}
+          - key: cloudsql-connection-ip
+            value: {{ cloudsqlConnectionIP }}
+          - key: bucket-name
+            value: {{ bucketName }}
+          - key: service-account-name
+            value: {{ svcAccountName }}
+          - key: service-account-key-base-64
+            value: {{ svcAccountKeyBase64 }}
+          - key: rtc-name
+            value: {{ rtcName }}
+          - key: ip-variable-name
+            value: {{ ipVariableName }}
+          - key: ip-var-wait-timeout
+            value: {{ ipVarWaitTimeout }}
+          - key: lb-wait-timeout
+            value: {{ loadBalancerWaitTimeout }}
+          - key: status-config-url
+            value: https://runtimeconfig.googleapis.com/v1beta1/projects/{{ project }}/configs/{{ rtcName }}
+          - key: status-variable-path
+            value: startup-status
+          - key: admin-status-path
+            value: admin-status
+          - key: is-admin-node
+            value: true
+      tags:
+        items:
+          - {{ deployment }}-tcp-80
+          - {{ deployment }}-sql-client
+      serviceAccounts:
+        - email: default
+          scopes:
+            - 'https://www.googleapis.com/auth/cloudruntimeconfig'
+
+
+# admin Instance Group Manager
+- name: {{ deployment }}-admin-igm
+  type: compute.beta.instanceGroupManager
+  properties:
+    baseInstanceName: {{ deployment }}-admin-vm
+    instanceTemplate: $(ref.{{ deployment }}-admin-it.selfLink)
+    targetSize: 1
+    zone: {{ zone }}
+    namedPorts:
+      - name: 'http'
+        port: 80
+    autoHealingPolicies:
+      - healthCheck: $(ref.{{ deployment }}-admin-autoheal.selfLink)
+        initialDelaySec: 180
+  metadata:
+    dependsOn:
+    - {{ deployment }}-sql-wordpress-user
+    - {{ deployment }}-svc-account-key
+    - {{ deployment }}-{{ projectNumber }}-wp-data
+
+# admin Auto Healing Health Check
+- name: {{ deployment }}-admin-autoheal
+  type: compute.v1.httpHealthCheck
+  properties:
+    checkIntervalSec: 30
+    timeoutSec: 30
+    unhealthyThreshold: 4
+    port: 80
+    portName: http
+    requestPath: /
+
+
+# admin HTTP Health Check
+- name: {{ deployment }}-admin-health
+  type: compute.v1.httpHealthCheck
+  properties:
+    checkIntervalSec: 10
+    timeoutSec: 10
+    unhealthyThreshold: 2
+    port: 80
+    portName: http
+    requestPath: /
+
+# admin Backend Service(s)
+- name: {{ deployment }}-admin-backend
+  type: compute.v1.backendService
+  properties:
+    loadBalancingScheme: EXTERNAL
+    sessionAffinity: GENERATED_COOKIE
+    affinityCookieTtlSec: 0
+    healthChecks: [ $(ref.{{ deployment }}-admin-health.selfLink) ]
+    backends:
+      - balacingMode: RATE
+        group: $(ref.{{ deployment }}-admin-igm.instanceGroup)
+
+outputs:
+  - name: backendSelfLink
+    value: $(ref.{{ deployment }}-admin-backend.selfLink)

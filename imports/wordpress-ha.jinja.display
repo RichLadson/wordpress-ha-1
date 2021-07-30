@@ -1,0 +1,172 @@
+description:
+  author:
+    shortDescription: Popular open stacks on Google Compute Engine packaged by Google.
+    title: Google Click to Deploy
+    url: https://cloud.google.com/solutions/#click-to-deploy
+  descriptionHtml: WordPress is web software used to create websites and blogs. This
+    High Availabiliy installation of WordPress leverages features of GCP such as Cloud
+    SQL and Cloud Storage to provide you with a highly available WordPress blog. As
+    a best practice, we recommend creating a separate project for this deployment.
+  icon: '@media/wordpress.png'
+  logo: '@media/wordpress.png'
+  architectureDiagram: '@media/wpha-arch.png'
+  tagline: Web publishing platform for building blogs and websites
+  title: WordPress High Availability (Beta)
+  url: https://wordpress.org/
+  version: 5.7.2
+  architectureDescription: WordPress will be deployed in a cluster of Compute Engine
+    instances.
+  documentations:
+  - title: Follow best practices for deployments
+    url: https://cloud.google.com/docs/enterprise/best-practices-for-enterprise-organizations
+    description: Learn about GCP best practices, like isolating production deployment
+      projects
+    destinations:
+    - DESTINATION_CONFIGURATION
+  - title: WordPress HA Getting Started Guide
+    url: https://github.com/GoogleCloudPlatform/click-to-deploy/blob/master/vm/docs/wordpress-ha/getting-started-guide.md
+    description: Learn about this WordPress High Availability Solution
+    destinations:
+    - DESTINATION_CONFIGURATION
+    - DESTINATION_POST_DEPLOY
+  - title: Get started with WordPress
+    url: https://codex.wordpress.org/Getting_Started_with_WordPress
+    description: Learn about Getting Started with WordPress
+    destinations:
+    - DESTINATION_CONFIGURATION
+    - DESTINATION_POST_DEPLOY
+  - title: Get started with PHP
+    url: https://php.net/manual/en/tutorial.php
+    description: Learn about Getting Started with PHP
+    destinations:
+    - DESTINATION_CONFIGURATION
+    - DESTINATION_POST_DEPLOY
+  support:
+  - title: Support
+    descriptionHtml: Google does not offer support for this solution. However, community
+      support is available on <a href="https://stackoverflow.com/questions/tagged/wordpress/">Stack
+      Overflow</a>. Additional support is available from <a href="https://en.forums.wordpress.com/">WordPress</a>.<p><p><a
+      href="https://stackoverflow.com/questions/tagged/wordpress/">Go to Stack Overflow</a><p><a
+      href="https://en.forums.wordpress.com/">Go to WordPress</a>
+  softwareGroups:
+  - software:
+    - title: Debian
+      version: '9.13'
+    type: SOFTWARE_GROUP_OS
+  - software:
+    - title: Apache2
+      version: 2.4.25
+    - title: MySQL-Client
+      version: 5.7.34
+    - title: PHP
+      version: 7.4.21
+    - title: WP-CLI
+      version: 2.5.0
+    - title: WordPress
+      version: 5.7.2
+input:
+  properties:
+  - name: zone
+    title: Zone
+  - name: contentNodeMachineType
+    title: Content Nodes Machine Type
+  - name: adminNodeMachineType
+    title: Admin Node Machine Type
+  - name: diskType
+    title: Disk type
+  - name: bootDiskSizeGb
+    title: Disk size in GB
+  - name: wordpressAdminEmail
+    title: Administrator Email
+    tooltip: This email will be used if you need to reset your password.
+    placeholder: example@domain.com
+  - name: inputEnableMultisite
+    title: Enable Multisite feature
+    subtext: Multisite installation allows you to create and manage a network of multiple
+      websites from a single WordPress dashboard.
+  - name: instancegroupTargetSize
+    title: Content Instance Group Target Size
+    tooltip: This is the ideal number of instances in your content serving instance
+      group. It will scale up to the maximum you define based on CPU load.
+  - name: maxNumReplicas
+    title: Max Content Instance Group Replicas
+    tooltip: This is the maximum number of instances that your content serving instance
+      group manager will scale up to.
+  - name: dbMachineType
+    title: Cloud SQL Machine Type
+    section: CLOUDSQL
+  - name: dbDataDiskType
+    title: Cloud SQL Disk Type
+    section: CLOUDSQL
+  - name: dbDataDiskSizeGb
+    title: Cloud SQL Disk Size (GB)
+    section: CLOUDSQL
+  - name: dbFailoverEnabled
+    title: Enable Database Failover
+    section: CLOUDSQL
+  - name: network
+    title: Network name
+    section: NETWORKING
+  - name: subnetwork
+    title: Subnetwork name
+    section: NETWORKING
+  - name: iamApiEnabled
+    title: Confirm that IAM API is enabled
+    subtext: Visit <a href='https://console.developers.google.com/apis/api/iam.googleapis.com/overview'>this
+      link</a> to enable the API.
+    section: APIs
+  - name: cloudSqlApiEnabled
+    title: Confirm that Cloud SQL API is enabled
+    subtext: Visit <a href='https://console.developers.google.com/apis/api/sqladmin.googleapis.com/overview'>this
+      link</a> to enable the API.
+    section: APIs
+  - name: cloudBuilderApiEnabled
+    title: Confirm that Cloud Build API is enabled
+    subtext: Visit <a href='https://console.developers.google.com/apis/api/cloudbuild.googleapis.com/overview'>this
+      link</a> to enable the API.
+    section: APIs
+
+
+  sections:
+  - name: APIs
+    title: Confirm necessary GCP APIs are already enabled
+    tooltip: This deployment requires a few APIs to be enabled.
+  - name: CLOUDSQL
+    title: CloudSQL
+    tooltip: Each instance requires a disk to boot from.
+  - name: NETWORKING
+    title: Networking
+
+runtime:
+  deployingMessage: Deployment can take several minutes to complete.
+  applicationTable:
+    rows:
+    - label: Site address
+      value: <a href="http://{{ outputs().ip }}/">http://{{ outputs().ip }}/</a>
+    - label: Admin URL
+      value: <a href="http://{{ outputs().ip }}/wp-admin">http://{{ outputs().ip }}/wp-admin</a>
+    - label: Instance zone
+      value: '{{ properties().zone }}'
+    - label: WordPress admin email
+      value: '{{ outputs().wordpressAdminEmail }}'
+    - label: WordPress admin password
+      value: '{{ outputs().wordpressAdminPassword }}'
+    - label: CloudSQL user
+      value: wordpress
+    - label: CloudSQL password
+      value: '{{ outputs().cloudsqlUserPassword }}'
+  primaryButton:
+    label: Log into the admin panel
+    type: TYPE_URL
+    action: http://{{ outputs().ip }}/wp-admin
+  suggestedActions:
+  - heading: Log in to the admin console
+    description: Visit the WordPress admin console at <a href="http://{{ outputs().ip
+      }}/wp-admin/">http://{{ outputs().ip }}/wp-admin/</a>
+  - heading: Change the temporary passwords
+    description: For additional security, it is recommended that you change the passwords.
+  - heading: Create a network sites using Multisite feature
+    description: Visit <a href="https://wordpress.org/support/article/create-a-network/#step-3-installing-a-network">
+      Create a Network for sites</a> and continue installation from Step 3.
+    showIf: '{{ properties().inputEnableMultisite }}'
+metadataVersion: v1
